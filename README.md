@@ -50,45 +50,23 @@ organised after Uncle Bob's Clean Architecture. It has three features:
 
 How a `/data` request runs in Go:
 
-```mermaid
-sequenceDiagram
-    participant F as Fiber
-    participant M as JwtAuth middleware
-    participant H as CRUD handler
-    participant U as crudUsecase
-    participant G as GetCRUDRepository
-    participant R as Postgres crudRepository
-    F->>M: GET /api/v1/data/users/
-    M->>M: ParseToken (secret read from global config)
-    M->>M: SELECT user_tokens WHERE access = token (plain text)
-    M->>H: c.Locals("user", "user_permission")
-    H->>U: CrudUsecase() created per request
-    U->>G: slug "users"
-    G->>G: rebuild slug map from config.EntitiyModels
-    G->>R: CrudRepository()
-    R->>R: PostgresHandler() opens a new connection pool
-    R-->>H: rows via reflection + Avro schema
-```
+1. `JwtAuth` middleware parses the token with the secret from the **global** `config.Config`, then looks the token
+   up in `user_tokens`, where it is stored **in plain text**.
+2. The CRUD handler creates a new `crudUsecase`, which calls `GetCRUDRepository(slug)`.
+3. That rebuilds the slug map from `config.EntitiyModels` and creates a repository, whose constructor calls
+   `PostgresHandler()`: **a new connection pool on every request**.
+4. Rows and the Avro schema are built by reflection.
 
 The folders follow Clean Architecture, but some imports go the wrong way (red), so the inner layers still depend
-on GORM, the global config and concrete repositories:
+on GORM, the global config and concrete repositories. Side by side with the Python version:
 
-```mermaid
-flowchart LR
-    handlers[interface/handlers] --> usecases
-    usecases --> domain
-    usecases -->|crudUsecase| repoimpl[interface/repositories/crud]
-    repoimpl --> config
-    config --> models[domain/models]
-    models --> gorm[(GORM)]
-    app[domain/entities/application.go] --> usecases
-    auth[shared/authentication] --> config
-    linkStyle 2,5,6,7 stroke:#d33,stroke-width:2px
-```
+[![Go vs Python dependencies](docs/diagrams/go-vs-python.png)](docs/diagrams/go-vs-python.png)
 
 ## The Python design
 
 Same four layers and the same API, but every import points inwards and the rule is checked by a test.
+
+[![Clean Architecture layers](docs/diagrams/clean-architecture.png)](docs/diagrams/clean-architecture.png)
 
 ```text
 backend/src/app
@@ -113,33 +91,13 @@ backend/src/app
 └── shared                      # tiny helpers with no app imports
 ```
 
-Imports only point inwards:
-
-```mermaid
-flowchart LR
-    infrastructure --> config --> interface --> usecases --> domain
-```
-
 `infrastructure/fastapi/container.py` is the composition root: it creates the engine, the security services
 and the use cases, and hands them to routers that are built by factory functions. Nothing below it reads
 global state.
 
-How a login request flows through the layers:
+How a request flows through the layers, and which layer answers each kind of failure:
 
-```mermaid
-sequenceDiagram
-    participant R as Router (interface)
-    participant U as UserUsecase (usecases)
-    participant Repo as SqlAlchemyUserRepository (interface)
-    participant T as JwtTokenService (infrastructure)
-    R->>U: login(email, password)
-    U->>Repo: get_by_email()
-    U->>U: PasswordHasher.verify()
-    U->>T: issue(access), issue(refresh)
-    U->>Repo: save_session(sha256 digests)
-    U-->>R: LoginResult
-    R-->>R: map to UserLoginResponse / ErrorResponse
-```
+[![Request lifecycle and failure handling](docs/diagrams/request-lifecycle.png)](docs/diagrams/request-lifecycle.png)
 
 ## Go vs Python: what changed and why
 
@@ -240,14 +198,7 @@ Not ported: the Go `Create` / `Update` / `Delete` CRUD methods, because they are
 
 Runs on a home server behind Cloudflare Tunnel ([`deploy/docker-compose.yml`](deploy/docker-compose.yml)):
 
-```mermaid
-flowchart LR
-    user[Browser] --> cf[Cloudflare Tunnel]
-    cf --> nginx["nginx: SPA, rate limit, /api proxy"]
-    nginx --> api["FastAPI x4 workers"]
-    api --> pg[(PostgreSQL)]
-    api -.optional.-> atlas[(MongoDB Atlas)]
-```
+[![Deployment](docs/diagrams/deployment.png)](docs/diagrams/deployment.png)
 
 - Only nginx is published, on `127.0.0.1`; Postgres and the API are reachable only inside the Docker network.
 - The API container runs `alembic upgrade head` before starting, and Docker restarts it if `/health/live` fails.
@@ -258,6 +209,9 @@ flowchart LR
 cp deploy/.env.example deploy/.env      # fill in passwords / secret
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
+
+Diagrams are draw.io files in [`docs/diagrams/`](docs/diagrams) (open them in diagrams.net to edit).
+Icons: [Devicon](https://devicon.dev) (MIT) and [Simple Icons](https://simpleicons.org) (CC0).
 
 ## Where each Go file went
 
