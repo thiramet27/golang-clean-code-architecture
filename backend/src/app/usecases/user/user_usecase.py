@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+from weakref import WeakKeyDictionary
 
 from app.domain.entities.user import (
     LoginResult,
@@ -22,27 +23,28 @@ def token_digest(token: str) -> str:
 
 
 class UserUsecase:
+    # A use case is created per request, so the dummy hash is cached per hasher instead of per instance.
+    _dummy_hashes: "WeakKeyDictionary[PasswordHasher, str]" = WeakKeyDictionary()
+
     def __init__(self, users: UserRepository, hasher: PasswordHasher, tokens: TokenService) -> None:
         self._users = users
         self._hasher = hasher
         self._tokens = tokens
-        # Used to keep login timing the same whether or not the email exists.
-        self._dummy_hash = hasher.hash("timing-equalizer")
 
     async def register(self, new_user: NewUser) -> User:
         if len(new_user.password) < MIN_PASSWORD_LENGTH:
             raise ValidationError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
         return await self._users.insert(
             email=new_user.email.lower(),
-            password_hash=self._hasher.hash(new_user.password),
+            password_hash=await self._hasher.hash(new_user.password),
             first_name=new_user.first_name,
             last_name=new_user.last_name,
         )
 
     async def login(self, email: str, password: str) -> LoginResult:
         credentials = await self._users.get_by_email(email.lower())
-        password_hash = credentials.password_hash if credentials else self._dummy_hash
-        if not self._hasher.verify(password, password_hash) or credentials is None:
+        password_hash = credentials.password_hash if credentials else await self._get_dummy_hash()
+        if not await self._hasher.verify(password, password_hash) or credentials is None:
             raise InvalidCredentialsError()
 
         user = credentials.user
@@ -80,6 +82,13 @@ class UserUsecase:
         return await self._require_user(user_id)
 
     # --- helpers ---
+
+    async def _get_dummy_hash(self) -> str:
+        """Checked against when the email doesn't exist, so login takes as long as with a real account."""
+        cached = self._dummy_hashes.get(self._hasher)
+        if cached is None:
+            cached = self._dummy_hashes[self._hasher] = await self._hasher.hash("timing-equalizer")
+        return cached
 
     async def _verify_session_token(self, token: str, expected: TokenType) -> TokenClaims:
         claims = self._tokens.parse(token)

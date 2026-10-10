@@ -1,13 +1,19 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.entities.user import User, UserCredentials, UserSession
 from app.domain.errors import EmailAlreadyUsedError
 from app.domain.repositories.user_repository import UserRepository
-from app.interface.repositories.postgres.models import UserModel, UserPermissionModel, UserTokenModel
+from app.interface.repositories.postgres.models import (
+    UserModel,
+    UserPermissionModel,
+    UserTokenModel,
+    utcnow,
+)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -50,15 +56,15 @@ class SqlAlchemyUserRepository(UserRepository):
         return _to_entity(model)
 
     async def save_session(self, session: UserSession) -> None:
-        model = await self._session.scalar(
-            select(UserTokenModel).where(UserTokenModel.user_id == session.user_id)
+        # One atomic upsert. "SELECT then INSERT" (and Go's "UPDATE, INSERT if 0 rows") races when the
+        # same user logs in twice at once: both see no row and the second INSERT hits the unique key.
+        dialect = self._session.get_bind().dialect.name
+        insert = postgresql.insert if dialect == "postgresql" else sqlite.insert
+        values = {"access": session.access_digest, "refresh": session.refresh_digest, "updated_at": utcnow()}
+        statement = insert(UserTokenModel).values(user_id=session.user_id, **values)
+        await self._session.execute(
+            statement.on_conflict_do_update(index_elements=[UserTokenModel.user_id], set_=values)
         )
-        if model is None:
-            model = UserTokenModel(user_id=session.user_id)
-            self._session.add(model)
-        model.access = session.access_digest
-        model.refresh = session.refresh_digest
-        await self._session.flush()
 
     async def find_session(self, user_id: int) -> UserSession | None:
         model = await self._session.scalar(select(UserTokenModel).where(UserTokenModel.user_id == user_id))

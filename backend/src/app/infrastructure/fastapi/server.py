@@ -1,4 +1,3 @@
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,9 +5,11 @@ from fastapi import FastAPI
 
 from app.config.settings import Settings, get_settings
 from app.infrastructure.fastapi.container import Container
-from app.infrastructure.fastapi.middlewares import add_access_log, add_cors, add_error_handlers
+from app.infrastructure.fastapi.middlewares import add_cors, add_error_handlers, add_request_context
+from app.infrastructure.logging import setup_logging
 from app.interface.handlers.fastapi.auth import create_jwt_auth
 from app.interface.handlers.fastapi.modules.crud import create_crud_router
+from app.interface.handlers.fastapi.modules.health import create_health_router
 from app.interface.handlers.fastapi.modules.monitor import create_monitor_router
 from app.interface.handlers.fastapi.modules.user import create_user_router
 
@@ -35,13 +36,14 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.state.container = container
 
     add_cors(app, settings.cors_origins)
-    add_access_log(app)
+    add_request_context(app)
     add_error_handlers(app)
 
     jwt_auth = create_jwt_auth(container.get_user_usecase)
     app.include_router(create_monitor_router(container.get_monitor_usecase), prefix=API_PREFIX)
+    app.include_router(create_health_router(container.get_health_usecase), prefix=API_PREFIX)
     app.include_router(create_user_router(container.get_user_usecase, jwt_auth), prefix=API_PREFIX)
     app.include_router(create_crud_router(container.get_crud_usecase, jwt_auth), prefix=API_PREFIX)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    setup_logging()
     return app

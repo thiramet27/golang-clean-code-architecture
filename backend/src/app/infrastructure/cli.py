@@ -16,7 +16,7 @@ from app.interface.repositories.postgres.models import UserModel, UserPermission
 
 
 async def grant_permission(email: str, permission: str) -> None:
-    engine = create_engine(get_settings().sqlalchemy_url)
+    engine = create_engine(get_settings())
     async with create_session_factory(engine)() as session, session.begin():
         user_id = await session.scalar(select(UserModel.id).where(UserModel.email == email.lower()))
         if user_id is None:
@@ -38,7 +38,9 @@ SAMPLE_PRODUCTS = [
 
 async def seed_products() -> None:
     settings = get_settings()
-    client, db = create_mongo_database(settings.mongodb_db_atlas_uri, settings.mongodb_db_name)
+    client, db = create_mongo_database(
+        settings.mongodb_db_atlas_uri, settings.mongodb_db_name, settings.mongodb_timeout_ms
+    )
     if client is None or db is None:
         raise SystemExit("GOAPP_MONGODB_DB_ATLAS_URI is not set")
     if await db.products.count_documents({}) == 0:

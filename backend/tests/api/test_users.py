@@ -41,7 +41,8 @@ async def test_login_wrong_password(api: Api) -> None:
     await api.register()
     response = await api.login(password="wrong-password")
     assert response.status_code == 400
-    assert response.json() == {"trace_id": "users-002", "message": "email or password is invalid"}
+    body = response.json()
+    assert (body["trace_id"], body["message"]) == ("users-002", "email or password is invalid")
 
 
 async def test_profile_requires_valid_token(api: Api) -> None:

@@ -34,6 +34,17 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    workers: int = 1  # uvicorn worker processes (ignored in development, which uses --reload)
+
+    # Fail fast instead of piling up requests when a database is slow or down
+    db_pool_size: int = 10
+    db_max_overflow: int = 5
+    db_pool_timeout: float = 5.0  # seconds to wait for a free connection
+    db_connect_timeout: float = 3.0
+    db_statement_timeout_ms: int = 5000
+    mongodb_timeout_ms: int = 2000
+    health_check_timeout: float = 2.0
+
     @property
     def sqlalchemy_url(self) -> str:
         if self.database_url:

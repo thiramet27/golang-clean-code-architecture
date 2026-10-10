@@ -7,9 +7,11 @@ from app.domain.entities.user import TokenClaims, TokenType
 
 
 class PasswordHasher(Protocol):
-    def hash(self, password: str) -> str: ...
+    """Async because hashing is deliberately slow (CPU-bound) and must not block the event loop."""
 
-    def verify(self, password: str, password_hash: str) -> bool: ...
+    async def hash(self, password: str) -> str: ...
+
+    async def verify(self, password: str, password_hash: str) -> bool: ...
 
 
 class TokenService(Protocol):

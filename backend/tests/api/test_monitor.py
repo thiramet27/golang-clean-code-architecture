@@ -10,7 +10,9 @@ async def test_health_check(client: AsyncClient) -> None:
 async def test_unknown_route_uses_go_error_format(client: AsyncClient) -> None:
     response = await client.get("/api/v1/nope")
     assert response.status_code == 404
-    assert response.json() == {"trace_id": "middlware-001", "message": "router not found"}
+    body = response.json()
+    assert (body["trace_id"], body["message"]) == ("middlware-001", "router not found")
+    assert body["request_id"] == response.headers["X-Request-ID"]
 
 
 async def test_swagger_is_served(client: AsyncClient) -> None:
