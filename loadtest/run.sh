@@ -5,4 +5,4 @@
 set -e
 cd "$(dirname "$0")"
 docker run --rm -i --network clean-api_default -e BASE_URL="${BASE_URL:-http://api:3000}" \
-  grafana/k6:latest run --quiet - < "$1"
+  -e RATE="${RATE:-}" grafana/k6:latest run --quiet - < "$1"

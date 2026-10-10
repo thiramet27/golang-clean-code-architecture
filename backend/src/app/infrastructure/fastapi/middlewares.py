@@ -1,5 +1,7 @@
+import errno
 import logging
 import re
+import socket
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -36,14 +38,29 @@ UNAVAILABLE_ERRORS = (
     ExecutionTimeout,
     ConnectionError,
     TimeoutError,
+    socket.gaierror,  # DB host name doesn't resolve (e.g. the db container is stopped)
 )
+NETWORK_ERRNOS = {
+    errno.ECONNREFUSED,
+    errno.ECONNRESET,
+    errno.EHOSTUNREACH,
+    errno.ENETUNREACH,
+    errno.ETIMEDOUT,
+}
 
 
-def is_database_unavailable(exc: BaseException) -> bool:
-    if isinstance(exc, UNAVAILABLE_ERRORS):
-        return True
-    # asyncpg reports a cancelled statement (statement_timeout) as a generic DBAPIError
-    return isinstance(exc, DBAPIError) and "statement timeout" in str(exc.orig)
+def is_database_unavailable(exc: BaseException | None) -> bool:
+    # Drivers often wrap the network error, so look through the whole cause chain.
+    while exc is not None:
+        if isinstance(exc, UNAVAILABLE_ERRORS):
+            return True
+        if isinstance(exc, OSError) and exc.errno in NETWORK_ERRNOS:
+            return True
+        # asyncpg reports a cancelled statement (statement_timeout) as a generic DBAPIError
+        if isinstance(exc, DBAPIError) and "statement timeout" in str(exc.orig):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 def add_cors(app: FastAPI, origins: list[str]) -> None:
@@ -106,6 +123,8 @@ def add_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        # Runs outside the request middleware, so restore the request id for these log lines.
+        request_id_var.set(getattr(request.state, "request_id", "-"))
         if is_database_unavailable(exc):
             error_log.warning("database unavailable: %s: %s", type(exc).__name__, exc)
             return respond(request, 503, DB_UNAVAILABLE, "database is unavailable, please try again shortly")

@@ -8,7 +8,7 @@ const json = { headers: { 'Content-Type': 'application/json' } }
 
 export const options = {
   scenarios: {
-    reads: { executor: 'constant-arrival-rate', rate: 200, timeUnit: '1s', duration: '60s',
+    reads: { executor: 'constant-arrival-rate', rate: Number(__ENV.RATE || 200), timeUnit: '1s', duration: '60s',
              preAllocatedVUs: 100, maxVUs: 300 },
   },
   thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<300'] },
