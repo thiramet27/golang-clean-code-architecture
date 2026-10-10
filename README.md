@@ -9,7 +9,8 @@ A Python rewrite of [max38/golang-clean-code-architecture](https://github.com/ma
 
 Contents: [the original Go system](#the-original-go-system) ·
 [the Python design](#the-python-design) · [what changed and why](#go-vs-python-what-changed-and-why) ·
-[bugs fixed](#bugs-fixed-from-the-go-version) · [API](#api)
+[reliability and load tests](#reliability-and-load-tests) · [bugs fixed](#bugs-fixed-from-the-go-version) ·
+[deployment](#deployment) · [API](#api)
 
 ## Run it
 
@@ -155,11 +156,61 @@ sequenceDiagram
 | API docs | Swagger comments written by hand (the README suggests generating them with ChatGPT); `/profile` is POST in code but GET in docs | OpenAPI generated from the route and model types | docs can't drift from the code |
 | Migrations | GORM `AutoMigrate` | versioned Alembic migrations | reviewable, reversible schema changes |
 | Tokens | stored in plain text; refresh lifetime = access lifetime | SHA-256 digests; correct lifetimes; token type checked; rotation keeps the first expiry | a DB leak isn't a session leak; sessions can't be extended forever |
-| Tests | none | 56 tests (use cases, JWT, HTTP end to end) + import-linter contracts | refactors are safe; the architecture can't silently erode |
+| Tests | none | 78 tests (use cases, JWT, HTTP end to end, failure cases) + import-linter contracts | refactors are safe; the architecture can't silently erode |
 | Tooling | | ruff, mypy `--strict`, Docker, Makefile | |
 
 Trade-off: the Go service is faster and ships as one binary. For an API whose time is spent in the database,
 async FastAPI is fast enough, and the gain is in validation, generated docs and tests.
+
+## Reliability and load tests
+
+What keeps the API up when traffic spikes or a dependency fails:
+
+| Risk | What the API does | Proof |
+|---|---|---|
+| bcrypt (~50-100 ms CPU per login) blocks the async event loop, so every request waits behind logins | hashing runs in worker threads (bcrypt releases the GIL) | `test_logins_do_not_freeze_other_requests`, login storm below |
+| one process = one point of failure | 4 uvicorn workers (`GOAPP_WORKERS`) | read test below |
+| a slow or dead database ties up every request | pool limits, 3 s connect timeout, 5 s Postgres `statement_timeout`, 2 s MongoDB timeouts; outages answer **503 `db-unavailable`** in milliseconds | `test_mongo_down_fails_fast_and_does_not_affect_postgres`, outage test below |
+| MongoDB is down | only `/data/products` fails; auth and Postgres data keep working; readiness reports `degraded` | same test |
+| health check says "fine" while the DB is down | `/api/v1/health/live` (process only, used by Docker to restart) and `/api/v1/health/ready` (parallel DB probes with a 2 s timeout, 503 when Postgres is down) | `test_health_usecase.py` |
+| brute force on login, or CPU exhaustion through bcrypt | nginx rate limit: 10/min per client IP (burst 5) on login and register; 429 before reaching Python | outage test below |
+| same user logging in twice at once returned 500 (unique key race, also in the Go code) | session write is one atomic `INSERT ... ON CONFLICT DO UPDATE` | `test_same_user_logging_in_concurrently` |
+| an unexpected error returns an HTML page and can't be traced | JSON 500 with a `request_id`; every response has `X-Request-ID` and every log line carries it | `test_resilience.py` |
+
+### Load test results
+
+k6 scripts are in [`loadtest/`](loadtest). Measured on the deployment machine (ThinkPad T14 Gen 2, Ryzen 7 PRO 5850U, 16 threads,
+Postgres in Docker), k6 calling the API container directly so the nginx rate limit doesn't interfere.
+"Before" is the first deployed version: one worker, bcrypt on the event loop.
+
+**Login storm**: 30 users logging in non-stop for 30 s, while a probe calls `GET /api/v1/` 20 times a second.
+
+| | Before | After |
+|---|---|---|
+| Probe latency p50 / p95 | 417 ms / 711 ms | **7 ms / 30 ms** |
+| Logins completed | ~8 per second | **~112 per second** |
+| All requests p95 | 5.1 s | **0.40 s** |
+
+**Read load**: authenticated `GET /api/v1/data/users/?_pageSize=20` at a fixed 200 requests/s for 60 s.
+
+| | Before | After |
+|---|---|---|
+| Throughput achieved | 101/s (5,745 requests never sent) | **199/s (0 dropped)** |
+| Latency p50 / p95 / p99 | 2.82 s / 7.98 s / 13.0 s | **8.8 ms / 13 ms / 17 ms** |
+
+Capacity after the changes: 500 requests/s still at p95 230 ms with no errors; the machine tops out around 510/s.
+
+### Failure tests on the live deployment
+
+| Scenario | Result |
+|---|---|
+| `docker compose stop db` | `/data/users` and `/users/login` → 503 `db-unavailable` in 20-45 ms; `/health/ready` → 503 in 7 ms; `/health/live` → 200 |
+| `docker compose start db` | recovers by itself (`pool_pre_ping`), no API restart |
+| 20 rapid logins from one IP | 6 handled (rate + burst), 14 rejected with JSON 429 |
+
+The first outage test returned 500 instead of 503: with the container stopped, the driver raised `socket.gaierror`
+(DNS), which wasn't classified as an outage. It is now, including when wrapped by the driver
+(`test_unavailable_errors.py`).
 
 ## Bugs fixed from the Go version
 
@@ -184,6 +235,29 @@ These were bugs or security problems in the original, fixed and covered by tests
 | CORS `*`, default secret `1234567890` | | configurable origins; app refuses to start in production with a short secret |
 
 Not ported: the Go `Create` / `Update` / `Delete` CRUD methods, because they are stubs that return `nil` and have no routes.
+
+## Deployment
+
+Runs on a home server behind Cloudflare Tunnel ([`deploy/docker-compose.yml`](deploy/docker-compose.yml)):
+
+```mermaid
+flowchart LR
+    user[Browser] --> cf[Cloudflare Tunnel]
+    cf --> nginx["nginx: SPA, rate limit, /api proxy"]
+    nginx --> api["FastAPI x4 workers"]
+    api --> pg[(PostgreSQL)]
+    api -.optional.-> atlas[(MongoDB Atlas)]
+```
+
+- Only nginx is published, on `127.0.0.1`; Postgres and the API are reachable only inside the Docker network.
+- The API container runs `alembic upgrade head` before starting, and Docker restarts it if `/health/live` fails.
+- Secrets live in `deploy/.env` on the server (see `deploy/.env.example`); in production the app refuses
+  to start with a weak `GOAPP_SECRET_KEY`.
+
+```bash
+cp deploy/.env.example deploy/.env      # fill in passwords / secret
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+```
 
 ## Where each Go file went
 
@@ -226,11 +300,12 @@ Slugs: `users`, `user-permissions` (admin only), `products` (MongoDB example, en
 ## Checks
 
 ```bash
-(cd backend && make check)    # ruff + mypy --strict + import-linter + pytest (56 tests)
+(cd backend && make check)    # ruff + mypy --strict + import-linter + pytest (78 tests)
 (cd frontend && pnpm test && pnpm lint && pnpm build)
 ```
 
-- **56 tests**: use cases with in-memory fakes, the JWT service, and the HTTP API end to end (SQLite in memory + mongomock).
+- **78 tests**: use cases with in-memory fakes, the JWT service, the HTTP API end to end (SQLite in memory + mongomock),
+  and failure cases (unreachable MongoDB, database errors, concurrent logins, a blocked event loop).
 - **import-linter** enforces the dependency rule. If someone imports SQLAlchemy into a use case,
   or a use case imports a repository implementation, `pytest` fails (`backend/tests/architecture/test_layers.py`).
 
