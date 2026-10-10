@@ -3,6 +3,9 @@
 #
 #   cp deploy/.env.example deploy/.env   # fill in the secrets
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Public URL (optional): cloudflared tunnel create <name>, tunnel route dns <name> <host>,
+# copy the credentials JSON to deploy/cloudflared/credentials.json, set TUNNEL_ID and COMPOSE_PROFILES=tunnel.
 name: clean-api
 
 services:
@@ -52,6 +55,21 @@ services:
       api: { condition: service_healthy }
     ports:
       - "127.0.0.1:${WEB_PORT:-8700}:80"
+
+  # Public HTTPS through a Cloudflare Tunnel (enable with COMPOSE_PROFILES=tunnel).
+  # No inbound port is opened: cloudflared connects out to Cloudflare and forwards to nginx.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on: [web]
+    command: >-
+      tunnel --no-autoupdate run
+      --credentials-file /etc/cloudflared/credentials.json
+      --url http://web:80
+      ${TUNNEL_ID:-}
+    volumes:
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
 
 volumes:
   pgdata:
