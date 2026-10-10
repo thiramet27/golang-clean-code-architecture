@@ -9,7 +9,7 @@ A Python rewrite of [max38/golang-clean-code-architecture](https://github.com/ma
 
 Contents: [the original Go system](#the-original-go-system) ·
 [the Python design](#the-python-design) · [what changed and why](#go-vs-python-what-changed-and-why) ·
-[reliability and load tests](#reliability-and-load-tests) · [bugs fixed](#bugs-fixed-from-the-go-version) ·
+[database and migrations](#database-and-migrations) · [reliability and load tests](#reliability-and-load-tests) · [bugs fixed](#bugs-fixed-from-the-go-version) ·
 [deployment](#deployment) · [API](#api)
 
 ## Run it
@@ -98,6 +98,27 @@ global state.
 How a request flows through the layers, and which layer answers each kind of failure:
 
 [![Request lifecycle and failure handling](docs/diagrams/request-lifecycle.png)](docs/diagrams/request-lifecycle.png)
+
+## Database and migrations
+
+[![Database and migrations](docs/diagrams/database-migrations.png)](docs/diagrams/database-migrations.png)
+
+- **ORM**: SQLAlchemy 2 with typed `Mapped[...]` models in
+  [`interface/repositories/postgres/models.py`](backend/src/app/interface/repositories/postgres/models.py).
+  They are adapters: repositories map rows to domain dataclasses, so nothing in `domain/` or `usecases/` imports SQLAlchemy.
+- **Migrations**: Alembic, async engine ([`backend/migrations/env.py`](backend/migrations/env.py)), first revision
+  [`0001_users_tokens_permissions.py`](backend/migrations/versions/0001_users_tokens_permissions.py).
+- **On deploy** the API container runs `alembic upgrade head` before uvicorn starts, so new code never runs against
+  an old schema. Verified on the server: `alembic_version` = `0001` after the first deploy.
+- Go used GORM `AutoMigrate`, run by hand: no history, no rollback, and it never renames or drops columns.
+
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "add phone to users"   # writes migrations/versions/xxxx_add_phone.py
+uv run alembic upgrade head                                       # apply
+uv run alembic downgrade -1                                       # roll back one revision
+uv run alembic current                                            # which revision the database is on
+```
 
 ## Go vs Python: what changed and why
 
@@ -211,7 +232,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
 
 Diagrams are draw.io files in [`docs/diagrams/`](docs/diagrams) (open them in diagrams.net to edit).
-Icons: [Devicon](https://devicon.dev) (MIT) and [Simple Icons](https://simpleicons.org) (CC0).
+Icons: [Devicon](https://devicon.dev) (MIT), [Simple Icons](https://simpleicons.org) (CC0) and [Lucide](https://lucide.dev) (ISC, used for Alembic, which has no official logo).
 
 ## Where each Go file went
 
