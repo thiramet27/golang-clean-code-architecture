@@ -1,0 +1,91 @@
+[project]
+name = "clean-api"
+version = "0.1.0"
+description = "Python (FastAPI) port of golang-clean-code-architecture"
+authors = [{ name = "Thiramet Phuthong", email = "thirametphuthong@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "bcrypt>=5.0.0",
+    "fastapi>=0.143.0",
+    "motor>=3.7.1",
+    "pydantic-settings>=2.15.0",
+    "pydantic[email]>=2.14.0",
+    "pyjwt>=2.15.1",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+serve = "app.infrastructure.fastapi.main:run"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "httpx>=0.28.1",
+    "import-linter>=2.15",
+    "mongomock-motor>=0.0.36",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["motor.*", "mongomock_motor.*"]
+ignore_missing_imports = true
+
+# Clean Architecture dependency rule: each layer may only import the layers below it.
+[tool.importlinter]
+root_package = "app"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Clean Architecture layers"
+type = "layers"
+layers = [
+    "app.infrastructure",
+    "app.config",
+    "app.interface",
+    "app.usecases",
+    "app.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain is framework-free"
+type = "forbidden"
+source_modules = ["app.domain", "app.usecases"]
+forbidden_modules = ["fastapi", "sqlalchemy", "motor", "pydantic", "jwt", "bcrypt", "starlette"]
+
+[[tool.importlinter.contracts]]
+name = "Shared helpers depend on nothing in the app"
+type = "forbidden"
+source_modules = ["app.shared"]
+forbidden_modules = ["app.domain", "app.usecases", "app.interface", "app.config", "app.infrastructure"]

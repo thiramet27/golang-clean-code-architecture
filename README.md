@@ -1,3 +1,24 @@
+## Python version (FastAPI) + frontend
+
+This fork adds a Python rewrite of the Go template below, plus a small React app that uses it.
+
+| Folder | What |
+|---|---|
+| [`backend-python/`](backend-python) | FastAPI + SQLAlchemy 2 + Alembic, same layers and API as the Go code. Structure, design notes and the list of fixes are in its [README](backend-python/README.md). |
+| [`frontend/`](frontend) | React + TypeScript client: register / login / profile, and a data browser whose table columns come from the API's `data_schema`. |
+
+```bash
+cd backend-python && uv sync && cp .env.example .env
+GOAPP_DATABASE_URL=sqlite+aiosqlite:///./dev.db uv run alembic upgrade head
+GOAPP_DATABASE_URL=sqlite+aiosqlite:///./dev.db uv run serve      # http://localhost:3000/swagger
+
+cd frontend && pnpm install && pnpm dev                              # http://localhost:5173
+```
+
+The original Go template is unchanged below and in `src/`.
+
+---
+
 ## Golang Clean Code Architecture Template
 
 Go (Golang) Clean Architecture based on Reading Uncle Bob's Clean Architecture. This code using GoFiber, GORM and User registerm authentication feature.

@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: golang-first-api
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      retries: 20
+
+  mongodb:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: golang-first-api
+    ports: ["27017:27017"]
+
+  api:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+      mongodb: { condition: service_started }
+    environment:
+      GOAPP_POSTGRES_DB_HOST: db
+      GOAPP_MONGODB_DB_ATLAS_URI: mongodb://root:golang-first-api@mongodb:27017/?authSource=admin
+      # demo only; set a real random value outside local docker
+      GOAPP_SECRET_KEY: local-docker-secret-change-me-0123456789abcdef
+      GOAPP_CORS_ORIGINS: '["http://localhost:5173"]'
+    ports: ["3000:3000"]
