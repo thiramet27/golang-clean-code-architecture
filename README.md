@@ -2,6 +2,8 @@
 
 A Python rewrite of [max38/golang-clean-code-architecture](https://github.com/max38/golang-clean-code-architecture), plus a small React app that uses it.
 
+**Live demo:** https://clean-api.bhbhbh.website · API docs: https://clean-api.bhbhbh.website/swagger
+
 | Folder | What |
 |---|---|
 | [`backend/`](backend) | FastAPI + SQLAlchemy 2 (async) + Alembic, PostgreSQL and MongoDB |
