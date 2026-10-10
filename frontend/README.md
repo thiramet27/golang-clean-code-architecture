@@ -1,6 +1,6 @@
 # Khaojai frontend
 
-A small React client for the FastAPI backend in `../backend-python`. It covers auth (register, login, profile, logout) and a data browser that builds its table from the API's schema.
+A small React client for the FastAPI backend in `../backend`. It covers auth (register, login, profile, logout) and a data browser that builds its table from the API's schema.
 
 Stack: Vite, React 19, TypeScript (strict), React Router and plain CSS. No UI or state libraries.
 
