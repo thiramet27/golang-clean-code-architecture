@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
 import { Link, Navigate, useLocation } from 'react-router-dom'
+import { DOCS_URL } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { ErrorMessage } from '../components/ErrorMessage'
 import { TextField } from '../components/TextField'
@@ -34,6 +35,9 @@ export function LoginPage() {
       </form>
       <p className="muted">
         No account? <Link to="/register">Register</Link>
+      </p>
+      <p className="muted">
+        Only want to look at the API? <a href={DOCS_URL}>Open the Swagger docs</a>, no login needed.
       </p>
     </section>
   )

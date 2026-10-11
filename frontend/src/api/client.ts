@@ -2,6 +2,8 @@ import { tokenStore } from './tokens'
 import type { ErrorBody, Session } from './types'
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/$/, '')
+/** Swagger UI served by FastAPI next to the API. */
+export const DOCS_URL = `${API_URL.replace(/\/api\/v1$/, '')}/swagger`
 
 export class ApiError extends Error {
   readonly status: number
